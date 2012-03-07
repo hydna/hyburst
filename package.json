@@ -1,0 +1,23 @@
+{
+	"name": "hyburst",
+	"version": "1.0.0",
+	"description": "Hydna Burst Application",
+	"keywords": ["hermes", "wink"],
+	"homepage": "https://github.com/hydna/hyburst",
+	"author": "Hydna AB <info@hydna.com> (http://www.hydna.com/)",
+  "dependencies" : {
+    "hydna": "=1.0.0"
+  },
+  "main": "./lib",
+  "bin": {
+		"hyburst": "./bin/hyburst"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/hydna/hyburst.git"
+	},
+	"os": ["macos", "linux"],
+	"engines": {
+		"node": ">=0.6.5"
+	}
+}

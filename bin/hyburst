@@ -1,0 +1,209 @@
+#!/usr/bin/env node
+//
+//        Copyright 2012 Hydna AB. All rights reserved.
+//
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions
+//  are met:
+//
+//    1. Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//
+//    2. Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in the
+//       documentation and/or other materials provided with the distribution.
+//
+//  THIS SOFTWARE IS PROVIDED BY HYDNA AB ``AS IS'' AND ANY EXPRESS OR IMPLIED
+//  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+//  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+//  EVENT SHALL HYDNA AB OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+//  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+//  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+//  USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+//  ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
+//  TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+//  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+//  The views and conclusions contained in the software and documentation are
+//  those of the authors and should not be interpreted as representing
+//  official policies, either expressed or implied, of Hydna AB.
+//
+
+
+//
+//  usage: hyburst domain -n=1 -w=1
+//
+//  Available options:
+//    -n=1      Interval between send
+//    -s=100    Package size in bytes
+//    -m=1      Mode, 1=Write, 2=Read/write
+//    -w=1      Number of workers
+//
+
+var hydna = require("hydna");
+var cluster = require("cluster");
+
+var OPT_RE = /\-(n\=\d+)|-(w\=\d+)|-(s\=\d+)|-(m\=\d+)|([A-Za-z0-9\-\.]+)/
+var MODES = { 1: "w", 2: "rw" };
+
+
+function main () {
+  var argv = process.argv.slice(2);
+  var opts = { "n": 1, "w": 1, "s": 100, "m": 1};
+  var domains = [];
+
+  argv.map(function (arg) {
+    var m = OPT_RE.exec(arg);
+    m && m.slice(1).forEach(function (m) {
+      if (m && m.indexOf("=") !== -1) {
+        opts[m.split("=")[0]] = parseInt(m.split("=")[1]);
+      } else if (m) {
+        domains.push(m);
+      }
+    });
+  });
+
+
+  if (!domains.length) {
+    console.error("Expected atleast one domain");
+    return process.exit(1);
+  }
+
+
+  if (opts.w < 1) {
+    console.error("Expected atleast one worker");
+    return process.exit(1);
+  }
+
+  if (cluster.isMaster) {
+    master(opts, domains);
+  } else {
+    worker(opts, domains);
+  }
+}
+
+
+function master (opts, domains) {
+  var stats = {};
+
+  domains.forEach(function (domain) {
+    stats[domain] = {
+      msgs: 0,
+      bytes: 0,
+      avgresp: 0
+    }
+  });
+
+
+  function onmessage (msg) {
+    var post;
+    var avg;
+
+    if ("cmd" in msg) return;
+
+    for (var k in msg) {
+      post = msg[k];
+      stats[k].msgs += post.length;
+      stats[k].bytes += post.length * opts.s;
+      avg = 0;
+      for (var i = 0; i < post.length; i++) {
+        avg += post[i];
+      }
+
+      stats[k].avgresp = avg / post.length;
+    }
+  }
+
+
+  function printstats () {
+    var out = "%s - Messages: %s, MB: %s, ping: %s ms";
+    var mb;
+    for (var k in stats) {
+      mb = ((stats[k].bytes / 1024) / 1024).toFixed(2);
+      console.log(out, k, stats[k].msgs, mb, Math.floor(stats[k].avgresp));
+    }
+  }
+
+  function fork () {
+    var worker;
+    worker = cluster.fork();
+    worker.on("message", onmessage);
+  }
+
+  console.log("Starting %s workers...", opts.w);
+
+  for (var i = 0; i < opts.w; i++) {
+    fork();
+  }
+
+  setInterval(printstats, 5000);
+}
+
+
+function worker (opts, domains) {
+  var stats = {};
+
+  domains.forEach(function (domain) {
+    var id;
+    var mode;
+    var buffer;
+    var chan;
+    var now;
+
+    stats[domain] = [];
+
+    id = getRandomChannel();
+    mode = MODES[opts.m];
+    chan = hydna.createChannel(domain + "/" + id , mode);
+    buffer = createRandomBuffer(opts.s);
+
+    function sendOnInterval () {
+      chan.write(buffer);
+      stats[domain].push({ domain: domain, resp: 0 });
+      setTimeout(sendOnInterval, opts.n);
+    }
+
+    function sendOnResp () {
+      now = Date.now();
+      chan.write(buffer);
+    }
+
+    chan.on("connect", function () {
+      if (mode == "rw") {
+        sendOnResp();
+      } else {
+        sendOnInterval();
+      }
+    });
+
+    chan.on("data", function (data) {
+      if (data == buffer) {
+        stats[domain].push(Date.now() - now);
+        setTimeout(sendOnResp, opts.n);
+      }
+    });
+  });
+
+  (function flushstats () {
+    process.send(stats);
+    for (var k in stats) stats[k] = [];
+    setTimeout(flushstats, 1000);
+  })();
+}
+
+
+function getRandomChannel () {
+  return Math.floor(Math.random() * (0xFFFFFFFF - 1 + 1) + 1);
+}
+
+
+function createRandomBuffer (size) {
+  var buff = [];
+  for (var i = 0; i < size; i++) {
+    buff[i] = Math.floor(Math.random() * (125 - 33 + 1) + 33);
+  }
+  return buff.join("");
+}
+
+
+require.main == module && main();

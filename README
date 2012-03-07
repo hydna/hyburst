@@ -1,0 +1,25 @@
+Hydna Burst
+===========
+
+
+
+usage: hyburst domain [options]
+
+Available options:
+  -n=1      Interval between send
+  -s=100    Package size in bytes
+  -m=1      Mode, 1=Write, 2=Read/write
+  -w=1      Number of workers
+
+
+
+
+
+Example 1: 
+
+   hybrust demo.hydna.net demo2.hydna.net -n=1 -s=1024 -m=2
+   
+
+Example 2: 
+
+  hybrust demo.hydna.net -n=1 -s=1024*10 -m=2 -w=10
